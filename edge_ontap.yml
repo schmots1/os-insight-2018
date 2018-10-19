@@ -1,0 +1,125 @@
+---
+- hosts: localhost
+  name: Setup SVM
+  vars:
+    netapp_hostname: "172.32.0.182"
+    netapp_username: "admin"
+    netapp_password: netapp123
+    vserver: openstack
+    data_lif : 172.32.0.183
+    host: 172.32.0.201
+    aggr: aggr1
+    state: present
+  tasks:
+  - name: Create SVM
+    na_ontap_svm:
+      state: "{{ state }}"
+      name: "{{ vserver }}"
+      root_volume: "{{ vserver}}_root"
+      root_volume_aggregate: "{{ aggr }}"
+      root_volume_security_style: unix
+      hostname: "{{ netapp_hostname }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+  - name: Create interface
+    na_ontap_interface:
+      state: "{{ state }}"
+      interface_name: "{{ vserver }}_mgmt_data_1"
+      home_port: e0a
+      home_node: vsim-01
+      role: data
+      protocols: nfs
+      admin_status: up
+      failover_policy: local-only
+      firewall_policy: mgmt
+      is_auto_revert: true
+      address: "{{ data_lif }}"
+      netmask: 255.255.255.0
+      vserver: "{{ vserver }}"
+      hostname: "{{ netapp_hostname }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+  - name: change nfs status
+    na_ontap_nfs:
+      state: "{{ state }}"
+      service_state: started
+      vserver: "{{ vserver }}"
+      nfsv3: enabled
+      nfsv4: disabled
+      nfsv41: disabled
+      tcp: enabled
+      udp: enabled
+      vstorage_state: disabled
+      hostname: "{{ netapp_hostname }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+  - name: Create Policy
+    na_ontap_export_policy:
+      state: "{{ state }}"
+      name: openstack
+      vserver: "{{ vserver }}"
+      hostname: "{{ netapp_hostname }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+  - name: Setup rules
+    na_ontap_export_policy_rule:
+      state: "{{ state }}"
+      policy_name: "{{ item.policy }}"
+      vserver: "{{ vserver }}"
+      client_match: "{{ item.client }}"
+      ro_rule: sys
+      rw_rule: sys
+      super_user_security: sys
+      hostname: "{{ netapp_hostname }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+    with_items:
+      - { policy: default, client: 0.0.0.0/0 }
+      - { policy: openstack, client: "{{ host }}" }
+  - name: Create volume
+    na_ontap_volume:
+      state: "{{ state }}"
+      name: "{{ item }}"
+      aggregate_name: "{{ aggr }}"
+      size: 50
+      size_unit: gb
+      policy: openstack
+      junction_path: "/{{ item }}"
+      space_guarantee: "none"
+      vserver: "{{ vserver }}"
+      hostname: "{{ netapp_hostname }}"
+      username: "{{ netapp_username }}"
+      password: "{{ netapp_password }}"
+      https: true
+      validate_certs: false
+    with_items:
+      - cinder
+      - docker
+  - name: Update fstab file
+    lineinfile:
+      path: /etc/fstab
+      line: "{{ data_lif }}:/docker /var/lib/docker/volumes nfs nolock 0 0"
+  - name: Stop docker
+    service:
+      state: stopped
+      name: docker
+  - name: Mount nfs export
+    mount:
+      state: "{{ state }}"
+      path: /var/lib/docker/volumes
+      src: "{{ data_lif }}:/docker"
+      fstype: nfs
+  - name: Start docker
+    service:
+      state: started
+      name: docker

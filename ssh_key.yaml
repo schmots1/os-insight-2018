@@ -1,0 +1,18 @@
+---
+- hosts: localhost
+  name: Configure ssh pre-shared keys
+  tasks:
+  - name: Create ssh-key
+    user:
+      name: root
+      generate_ssh_key: yes
+- hosts: all
+  become: yes
+  become_method: sudo
+  name: Copy pre-shared keys to root
+  tasks:
+  - name: Add root pre-shared key
+    authorized_key:
+      user: root
+      state: present
+      key: "{{ lookup('file', '/root/.ssh/id_rsa.pub') }}"

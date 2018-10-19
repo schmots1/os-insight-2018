@@ -1,0 +1,177 @@
+--- 
+- hosts: all
+  become: yes
+  become_method: sudo
+  name: Prepare hosts to be OpenStack container hosts
+  vars:
+    version: 1
+    driver_name: ontap-nas
+    management_lif: 172.32.0.182
+    data_lif: 172.32.0.183
+    svm: openstack
+    username: admin
+    password: netapp123
+    aggregate: aggr1_1
+    user: netapp
+    export_policy: openstack
+  tasks:
+  - name: Remove swapfile from /etc/fstab
+    mount:
+      name: swap
+      fstype: swap
+      state: absent
+  - name: Disable swap
+    command: swapoff -a
+    when: ansible_swaptotal_mb > 0
+  - name: Installing Epel-release
+    package:
+      name: epel-release
+      state: latest
+    when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'
+  - name: Install required packages
+    package:
+      name: "{{ item }}"
+      state: latest
+    with_items:
+      - 'wget'
+      - 'nfs-utils'
+      - 'net-tools'
+      - 'python'
+      - 'python-devel'
+      - 'iscsi-initiator-utils'
+      - 'libffi-devel'
+      - 'openssl'
+      - 'openssl-devel'
+      - 'libselinux-python'
+      - 'gcc'
+      - 'gawk'
+      - 'bridge-utils'
+      - 'git'
+  - name: Install pip
+    package:
+      name: python2-pip
+      state: latest
+  - name: Update pip
+    pip:
+      name: pip
+      state: latest
+  - name: Install git
+    package:
+      name: git
+      state: latest
+  - name: Add Docker repo
+    get_url:
+      url: https://download.docker.com/linux/centos/docker-ce.repo
+      dest: /etc/yum.repos.d/docer-ce.repo
+  - name: Enable Docker Edge repo
+    ini_file:
+      dest: /etc/yum.repos.d/docer-ce.repo
+      section: 'docker-ce-edge'
+      option: enabled
+      value: 0
+  - name: Enable Docker Test repo
+    ini_file:
+      dest: /etc/yum.repos.d/docer-ce.repo
+      section: 'docker-ce-test'
+      option: enabled
+      value: 0
+  - name: Install Docker
+    package:
+      name: docker-ce
+      state: latest
+  - name: Start Docker service
+    service:
+      name: docker
+      state: started
+      enabled: yes
+  - name: Add user to docker group
+    user:
+      name: "{{ user }}"
+      groups: docker
+      append: yes
+#  - name: Create Trident config file dir
+#    file:
+#      path: /etc/netappdvp
+#      state: directory
+#  - name: Verfiy Trident config file is present
+#    file:
+#      path: /etc/netappdvp/config.json
+#      state: touch
+#  - name: Configure or verify Trident backend config.json
+#    lineinfile:
+#      path: /etc/netappdvp/config.json
+#      line: "{{ item }}"
+#    with_items:
+#      - "{"
+#      - '  "version": {{ version }},'
+#      - '  "storageDriverName": "{{ driver_name }}",'
+#      - '  "managementLIF": "{{ management_lif }}",'
+#      - '  "dataLIF": "{{ data_lif }}",'
+#      - '  "svm": "{{ svm }}",'
+#      - '  "username": "{{ username }}",'
+#      - '  "password": "{{ password }}",'
+#      - '  "aggregate": "{{ aggregate }}",'
+#      - '  "defaults": {'
+#      - '    "size": "50G",'
+#      - '    "spaceReserve": "none",'
+#      - '    "exportPolicy": "{{ export_policy }}"'
+#      - '  }'
+#      - "}"
+#  - name: Install Trident driver plugin
+#    command: docker plugin install netapp/trident-plugin:18.04 --alias netapp --grant-all-permissions
+- hosts: controller
+  become: yes
+  become_method: sudo
+  name: Configuring controller node to deploy Kolla
+  tasks:
+  - name: Install packages with pip
+    pip:
+      name: "{{ item }}"
+    with_items:
+      - 'ansible'
+      - 'kolla-ansible==6.0.0'
+  - name: Pull NetApp Kolla-Ansible patch
+    git:
+      repo: https://github.com/schmots1/os-insight-2018.git
+      force: yes
+      dest: /etc/kolla
+  - name: Modifying Ansible config file
+    ini_file:
+      dest: /etc/ansible/ansible.cfg
+      section: DEFAULT
+      option: "{{ item.option }}"
+      value: "{{ item.value }}"
+    with_items:
+      - { option: 'host_key_checking', value: 'False' }
+      - { option: 'pipelining', value: 'True' }
+      - { option: 'forks', value: '100' }
+  - name: Get patch files list
+    command: "find /etc/kolla/cinder -type f"
+    register: files_to_copy
+  - name: Patch Kolla for NetApp(RHEL)
+    copy:
+      src: "{{ item.src }}"
+      dest: "{{ item.dest }}"
+      force: yes
+      remote_src: yes
+    with_items:
+      - { src: '/etc/kolla/cinder/defaults/main.yml', dest: '/usr/share/kolla-ansible/ansible/roles/cinder/defaults/' }
+      - { src: '/etc/kolla/cinder/tasks/config.yml', dest: '/usr/share/kolla-ansible/ansible/roles/cinder/tasks/' }
+      - { src: '/etc/kolla/cinder/tasks/precheck.yml', dest: '/usr/share/kolla-ansible/ansible/roles/cinder/tasks/' }
+      - { src: '/etc/kolla/cinder/templates/cinder.conf.j2', dest: '/usr/share/kolla-ansible/ansible/roles/cinder/templates/' }
+      - { src: '/etc/kolla/cinder/templates/nfs_shares.j2', dest: '/usr/share/kolla-ansible/ansible/roles/cinder/templates/' }
+    when: ansible_distribution == 'CentOS' or ansible_distribution == 'Red Hat Enterprise Linux'
+  - name: Patch Kolla for NetApp(Ubuntu)
+    copy:
+      src: "{{ item.src }}"
+      dest: "{{ item.dest }}"
+      directory_mode: yes
+      force: yes
+      remote_src: yes
+    with_items:
+      - { src: '/etc/kolla/cinder/defaults/main.yml', dest: '/usr/local/share/kolla-ansible/ansible/roles/cinder/defaults/' }
+      - { src: '/etc/kolla/cinder/tasks/config.yml', dest: '/usr/local/share/kolla-ansible/ansible/roles/cinder/tasks/' }
+      - { src: '/etc/kolla/cinder/tasks/precheck.yml', dest: '/usr/local/share/kolla-ansible/ansible/roles/cinder/tasks/' }
+      - { src: '/etc/kolla/cinder/templates/cinder.conf.j2', dest: '/usr/local/share/kolla-ansible/ansible/roles/cinder/templates/' }
+      - { src: '/etc/kolla/cinder/templates/nfs_shares.j2', dest: '/usr/local/share/kolla-ansible/ansible/roles/cinder/templates/' }
+    when: ansible_distribution == 'Debian' or ansible_distribution == 'Ubuntu'
