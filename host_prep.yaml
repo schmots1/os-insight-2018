@@ -3,17 +3,6 @@
   become: yes
   become_method: sudo
   name: Prepare hosts to be OpenStack container hosts
-  vars:
-    version: 1
-    driver_name: ontap-nas
-    management_lif: 172.32.0.182
-    data_lif: 172.32.0.183
-    svm: openstack
-    username: admin
-    password: netapp123
-    aggregate: aggr1_1
-    user: netapp
-    export_policy: openstack
   tasks:
   - name: Remove swapfile from /etc/fstab
     mount:
@@ -36,21 +25,17 @@
       - 'wget'
       - 'nfs-utils'
       - 'net-tools'
-      - 'python'
-      - 'python-devel'
+      - 'python3'
+      - 'python3-devel'
       - 'iscsi-initiator-utils'
       - 'libffi-devel'
       - 'openssl'
       - 'openssl-devel'
-      - 'libselinux-python'
+      - 'libselinux-python3'
       - 'gcc'
       - 'gawk'
       - 'bridge-utils'
       - 'git'
-  - name: Install pip
-    package:
-      name: python2-pip
-      state: latest
   - name: Update pip
     pip:
       name: pip
@@ -89,36 +74,6 @@
       name: "{{ user }}"
       groups: docker
       append: yes
-#  - name: Create Trident config file dir
-#    file:
-#      path: /etc/netappdvp
-#      state: directory
-#  - name: Verfiy Trident config file is present
-#    file:
-#      path: /etc/netappdvp/config.json
-#      state: touch
-#  - name: Configure or verify Trident backend config.json
-#    lineinfile:
-#      path: /etc/netappdvp/config.json
-#      line: "{{ item }}"
-#    with_items:
-#      - "{"
-#      - '  "version": {{ version }},'
-#      - '  "storageDriverName": "{{ driver_name }}",'
-#      - '  "managementLIF": "{{ management_lif }}",'
-#      - '  "dataLIF": "{{ data_lif }}",'
-#      - '  "svm": "{{ svm }}",'
-#      - '  "username": "{{ username }}",'
-#      - '  "password": "{{ password }}",'
-#      - '  "aggregate": "{{ aggregate }}",'
-#      - '  "defaults": {'
-#      - '    "size": "50G",'
-#      - '    "spaceReserve": "none",'
-#      - '    "exportPolicy": "{{ export_policy }}"'
-#      - '  }'
-#      - "}"
-#  - name: Install Trident driver plugin
-#    command: docker plugin install netapp/trident-plugin:18.04 --alias netapp --grant-all-permissions
 - hosts: controller
   become: yes
   become_method: sudo
